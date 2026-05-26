@@ -57,5 +57,5 @@ christianaoki17@gmail.com
 Citation
 If you use this code, please cite:
 
-Christianah [Last Name]. (2025). Female Genital Schistosomiasis KAP Analysis
+Christianah Oki. (2026). Female Genital Schistosomiasis KAP Analysis
 [R script]. GitHub. https://github.com/Christianah100/Female_Genital_Schistosomiasis_KAP
