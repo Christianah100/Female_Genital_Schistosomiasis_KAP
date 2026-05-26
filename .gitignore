@@ -1,0 +1,29 @@
+# ===== R-specific =====
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+.Renviron
+*.Rproj
+
+# ===== Sensitive / data files =====
+# Prevent accidental upload of participant data
+*.xlsx
+*.xls
+*.csv
+*.sav
+*.dta
+
+# ===== Output files (optional - keep if you want to share outputs) =====
+*.docx
+*.pdf
+*.png
+
+# ===== OS-specific =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Editor/IDE =====
+.vscode/
+.idea/
