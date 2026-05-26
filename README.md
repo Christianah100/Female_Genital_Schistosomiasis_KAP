@@ -32,3 +32,30 @@ install.packages(c(
   "skimr", "readxl", "dplyr", "tidyr", "stringr", "ggplot2", "gt",
   "EMT", "flextable", "officer", "forcats", "scales"
 ))
+
+
+How to Run
+Clone or download this repository.
+Place the dataset HW_FGS_KAP.xlsx in your working directory.
+Open FGS_KAP_Analysis.R in RStudio.
+Update the setwd() path at the top of the script to match your folder.
+Run the script section by section.
+
+Outputs
+The script generates:
+
+Demographic and descriptive tables (Word format)
+Knowledge, attitude, and practice summary tables
+Logistic regression results (Odds Ratios with 95% CI)
+Forest plots and bar charts (Word and PNG)
+
+Author
+Christianah Oki
+Parasitology Research Unit, Department of Zoology, University of Ibadan, Nigeria 
+christianaoki17@gmail.com
+
+Citation
+If you use this code, please cite:
+
+Christianah [Last Name]. (2025). Female Genital Schistosomiasis KAP Analysis
+[R script]. GitHub. https://github.com/Christianah100/Female_Genital_Schistosomiasis_KAP
