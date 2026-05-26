@@ -1,0 +1,1643 @@
+
+getwd()
+list.files()
+setwd("C:/Users/chris/Downloads")
+library(tidyverse)
+library(janitor)
+library(gtsummary)
+library(broom)
+library(MASS)     # polr
+library(ordinal)  # clm
+library(skimr)
+library("readxl")
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(gtsummary)  # for nice tables
+library(broom)      # for tidy model outputs
+library(gt)
+library(EMT)        # for exact multinomial test
+library(flextable)
+library(officer)
+library(forcats)
+
+
+dat0 <- readxl::read_xlsx("HW_FGS_KAP.xlsx")
+dat <- dat0 %>%
+  janitor::clean_names() %>%        # makes names snake_case
+  mutate(across(where(is.character), ~str_squish(.)))
+  skimr::skim(dat)
+names(dat)  # Check actual column names after clean_names()
+
+names(dat)
+"x2_gender" %in% names(dat)
+
+dat <- dat %>%
+  mutate(
+    gender = factor(case_when(
+      str_detect(str_to_lower(x2_gender), "female")    ~ "Female",
+      str_detect(str_to_lower(x2_gender), "\\bmale\\b") ~ "Male",
+      TRUE ~ NA_character_
+    ), levels = c("Female","Male"))
+  )
+
+# quick check
+table(dat$gender, useNA = "ifany")
+
+dat <- dat %>%
+  mutate(
+    gender = factor(case_when(
+      str_detect(str_to_lower(x2_gender), "female")    ~ "Female",
+      str_detect(str_to_lower(x2_gender), "\\bmale\\b") ~ "Male",
+      TRUE ~ NA_character_
+  )),
+        
+        # Age groups: match the exact values
+        age_group = factor(case_when(
+            x3_how_old_are_you == "youth__20_30" ~ "Youth (18-27 years)",
+            x3_how_old_are_you == "young_adults__31_45" ~ "Young Adults (28-37 years)",
+            x3_how_old_are_you == "middle_age__46_and_55" ~ "Middle age (38-47 years)",
+            x3_how_old_are_you == "older_adults__56_and_above" ~ "Older Adults (48 years and above)",
+            TRUE ~ NA_character_
+        ), levels = c("Youth (18-27 years)",
+                      "Young Adults (28-37 years)",
+                      "Middle age (38-47 years)",
+                      "Older Adults (48 years and above)"),
+        ordered = TRUE),
+        
+        # Facility type: only primary_health_care in data
+        facility_type = factor(case_when(
+            x6_what_is_your_healthcare_facility_type == "primary_health_care" ~ "Primary Health Care",
+            TRUE ~ str_to_title(str_replace_all(x6_what_is_your_healthcare_facility_type, "_", " "))
+        )),
+        
+        # Profession: clean up the categories
+        cadre = factor(case_when(
+            what_is_your_profession == "community_health_extension_wor" ~ "Community Health Extension Worker",
+            what_is_your_profession == "junior_community_health_extens" ~ "Junior Community Health Extension Worker",
+            what_is_your_profession == "nurse_midwife" ~ "Nurse Midwife",
+            what_is_your_profession == "lab_technician" ~ "Lab Technician",
+            str_detect(what_is_your_profession, "others") ~ "Others",
+            TRUE ~ str_to_title(str_replace_all(what_is_your_profession, "_", " "))
+        )),
+        
+        # Years of experience: match exact values
+        years_exp = factor(case_when(
+            x11_how_long_have_you_been_working == "less_than_1_year" ~ "Less than 1 year",
+            x11_how_long_have_you_been_working == "1_5_years" ~ "1-5 years",
+            x11_how_long_have_you_been_working == "6_10_years" ~ "6-10 years",
+            x11_how_long_have_you_been_working == "11_15_years" ~ "11-15 years",
+            x11_how_long_have_you_been_working == "16_20_years" ~ "16 and above",
+            x11_how_long_have_you_been_working == "no_work_experience" ~ "No work experience",
+            TRUE ~ str_to_title(str_replace_all(x11_how_long_have_you_been_working, "_", " "))
+        ), levels = c("Less than 1 year", "1-5 years", "6-10 years",
+                      "11-15 years", "16 and above", "No work experience"),
+        ordered = TRUE)
+    )
+# verify it worked
+summary(dat$age_group)
+summary(dat$gender)
+
+ # Demographics overview
+ dat %>%
+     count(gender) %>%
+     mutate(pct = n/sum(n)*100)
+ 
+dat %>%
+     count(age_group) %>%
+     mutate(pct = n/sum(n)*100)
+	 
+dat %>%
+     count(cadre) %>%
+     mutate(pct = n/sum(n)*100)
+	 
+
+ dat %>%
+     count(years_exp) %>%
+     mutate(pct = n/sum(n)*100)
+	 
+# Cross-tabulations
+ dat %>%
+     count(age_group, years_exp) %>%
+     tidyr::pivot_wider(names_from = years_exp, values_from = n)
+
+# Age distribution
+ ggplot(dat, aes(x = age_group)) +
+     geom_bar(fill = "steelblue") +
+     theme_minimal() +
+     labs(title = "Age Distribution of Respondents")
+ 
+# Profession distribution
+ ggplot(dat, aes(y = fct_infreq(cadre))) +
+     geom_bar(fill = "darkgreen") +
+     theme_minimal() +
+     labs(title = "Healthcare Cadre Distribution")
+  
+# Awareness variables
+ dat %>% count(ever_heard_of_urogenital_schis)  # Q12
+ dat %>% count(x13_have_you_heard_o_schistosomiasis_fgs)  # Q13
+ dat %>% count(if_you_answered_yes_where_di)  # Source of info for schisto
+ # Knowledge variables
+ dat %>% count(x14_can_urogenital_s_ital_schistosomiasis)  # Can FGS be transmitted sexually?
+ dat %>% count(x15_what_do_you_thin_primary_cause_of_fgs)
+ dat %>% count(x16_do_you_know_how_ction_is_transmitted)
+ 
+ # Create table
+demo_table <- dat %>%
+     dplyr::select(gender, age_group, cadre, facility_type, years_exp) %>%
+     tbl_summary(
+         statistic = list(all_categorical() ~ "{n} ({p}%)"),
+         digits = all_categorical() ~ c(0, 1)
+     ) %>%
+     modify_header(label = "**Characteristic**") %>%
+     bold_labels()
+ 
+ # Export to Word (.docx)
+ demo_table %>%
+     as_gt() %>%
+     gt::gtsave("demographic2_table.docx")
+	 
+ # modify demographic2_table
+ # Create demographic table
+ demo_table <- dat %>%
+     dplyr::select(gender, age_group, cadre, facility_type, years_exp) %>%
+     tbl_summary(
+         statistic = list(all_categorical() ~ "{n} ({p}%)"),
+         digits = all_categorical() ~ c(0, 1),
+         label = list(
+             gender = "Gender",
+             age_group = "Age Group",
+             cadre = "Profession/Cadre",
+             facility_type = "Facility Type",
+             years_exp = "Years of Experience"
+         )
+     ) %>%
+     modify_header(label = "**Characteristic**") %>%
+     modify_caption("**Table 1: Demographic Characteristics of Respondents (N=60)**") %>%
+     bold_labels()
+ 
+ # Save to Word
+ demo_table %>%
+     as_gt() %>%
+     gt::gtsave("Table1_Demographics.docx")
+   
+ 
+  # Create table 2 - Awareness
+ awareness_table <- dat %>%
+     dplyr::select(ever_heard_of_urogenital_schis, x13_have_you_heard_o_schistosomiasis_fgs) %>%
+     tbl_summary()
+	 
+ # Save each separately
+ awareness_table %>%
+     as_gt() %>%
+     gt::gtsave("Table2_Awareness.docx")
+ # Knowledge items
+ cat("=== Q14: Can urogenital schistosomiasis lead to FGS ===\n")
+ # === Q14: Can urogenital schistosomiasis lead to FGS ===
+ unique(dat$x14_can_urogenital_s_ital_schistosomiasis)
+        
+ cat("\n=== Q15: Primary cause of FGS ===\n")
+
+ # === Q15: Primary cause of FGS ===
+ unique(dat$x15_what_do_you_thin_primary_cause_of_fgs)   
+
+ cat("\n=== Q17: Mode of transmission ===\n")
+
+ # === Q17: Mode of transmission ===
+ unique(dat$x17_what_is_the_mode_transmission_of_fgs)                     
+ 
+ cat("\n=== Q18: Symptoms (main) ===\n")
+
+ # === Q18: Symptoms (main) ===
+ unique(dat$x18_which_of_the_fol_u_associate_with_fgs)           
+ 
+ cat("\n=== Q19: FGS causes infertility and increased HIV risk ===\n")
+
+ # === Q19: FGS causes infertility and increased HIV risk ===
+ unique(dat$x19_do_you_know_that_ncreased_risk_of_hiv)
+ 
+ cat("\n=== Q20/97: FGS is preventable ===\n")
+
+ # === Q20/97: FGS is preventable ===
+ unique(dat$do_you_think_fgs_is_preventabl)
+ 
+ cat("\n=== Q27: Praziquantel ===\n")
+
+ # === Q27: Praziquantel ===
+ unique(dat$x27_is_praziquantel_the_treatment_of_fgs)
+ 
+ # Attitude items
+ cat("\n=== Q21: Severity ===\n")
+
+ # === Q21: Severity ===
+ unique(dat$x21_how_severe_do_yo_is_as_a_health_issue) 
+ 
+ cat("\n=== Q22: Missed diagnosis ===\n")
+
+ # === Q22: Missed diagnosis ===
+ unique(dat$x22_do_you_think_tha_healthcare_settings)
+ 
+ cat("\n=== Q23: Integrate in programs ===\n")
+
+ # === Q23: Integrate in programs ===
+ unique(dat$x23_should_fgs_aware_en_s_health_programs)          
+ 
+ # Practice items
+ cat("\n=== Q24: Encounter frequency ===\n")
+
+ # === Q24: Encounter frequency ===
+ unique(dat$x24_how_often_do_you_fgs_in_your_practice)     
+ 
+ cat("\n=== Q25: Ever treated ===\n")
+
+ # === Q25: Ever treated ===
+ unique(dat$have_you_ever_treated_a_patien)
+ 
+ cat("\n=== Q28: Screen for infertility ===\n")
+
+ # === Q28: Screen for infertility ===
+ unique(dat$x28_in_your_practice_infertility_for_fgs)
+ 
+ # Awareness
+ cat("\n=== Q12: Heard of urogenital schisto ===\n")
+
+ # === Q12: Heard of urogenital schisto ===
+ unique(dat$ever_heard_of_urogenital_schis)
+ 
+ cat("\n=== Q13: Heard of FGS ===\n")
+
+ # === Q13: Heard of FGS ===
+ unique(dat$x13_have_you_heard_o_schistosomiasis_fgs)
+ 
+ 
+
+ # ============================================================
+ # 1. KNOWLEDGE SCORE CREATION (Q14-Q20, Q27)
+ # ============================================================
+ 
+ # After seeing the values, this will be the structure:
+ # Score each item: 1 = correct, 0 = incorrect
+ 
+ dat <- dat %>%
+     mutate(
+         # Q14: Can urogenital schistosomiasis lead to FGS?
+         k14 = case_when(
+             # UPDATE THIS after seeing unique values
+             x14_can_urogenital_s_ital_schistosomiasis == "yes" ~ 1,
+             TRUE ~ 0
+         ),
+         
+         # Q15: Primary cause of FGS (Correct: Parasitic infection)
+         k15 = case_when(
+             # UPDATE THIS after seeing unique values
+             str_detect(x15_what_do_you_thin_primary_cause_of_fgs, "parasit|infect|schisto") ~ 1,
+             TRUE ~ 0
+         ),
+         
+         # Q17: Mode of transmission (Correct: Contact with contaminated water)
+         k17 = case_when(
+             # UPDATE THIS after seeing unique values
+             str_detect(x17_what_is_the_mode_transmission_of_fgs, "water|contaminat") ~ 1,
+             TRUE ~ 0
+         ),
+         
+         # Q18: Symptoms (multi-select) - Score if selected correct symptoms
+         # Correct: pelvic pain, vaginal bleeding, infertility, pain during sex
+         k18 = case_when(
+             # UPDATE THIS after seeing unique values
+             # Simple scoring: 1 if at least one correct symptom selected
+             TRUE ~ 0  # placeholder
+         ),
+         
+         # Q19: FGS causes infertility and increased HIV risk
+         k19 = case_when(
+             # UPDATE THIS after seeing unique values
+             x19_do_you_know_that_ncreased_risk_of_hiv == "yes" ~ 1,
+             TRUE ~ 0
+         ),
+         
+         # Q20/Q97: FGS is preventable
+         k20 = case_when(
+             # UPDATE THIS after seeing unique values
+             do_you_think_fgs_is_preventabl == "yes" ~ 1,
+             TRUE ~ 0
+         ),
+         
+         # Q27: Praziquantel for treatment (if including)
+         k27 = case_when(
+             # UPDATE THIS after seeing unique values
+             x27_is_praziquantel_the_treatment_of_fgs == "yes" ~ 1,
+             TRUE ~ 0
+         ),
+         
+         # TOTAL KNOWLEDGE SCORE (0-7 if including Q27, or 0-6 without)
+         knowledge_score = k14 + k15 + k17 + k18 + k19 + k20 + k27,
+         
+         # MAX possible score (update if not including Q27)
+         knowledge_max = 7,
+         
+         # ADEQUATE KNOWLEDGE (≥70% correct)
+         adequate_knowledge = factor(ifelse(
+             knowledge_score >= ceiling(0.70 * knowledge_max), 
+             "Adequate", 
+             "Inadequate"
+         ), levels = c("Inadequate", "Adequate"), ordered = TRUE)
+     )
+ # Verify knowledge score
+ summary(dat$knowledge_score)
+ table(dat$adequate_knowledge, useNA = "ifany")
+ 
+ # Check which variables have only 1 level
+  table(dat$facility_type)
+
+# H1: Remove facility_type (all same)
+model_h1 <- glm(adequate_knowledge ~ gender + age_group + cadre + years_exp,
+                data = dat, family = binomial(link = "logit"))
+				
+# Tidy output with ORs
+ library(broom)
+ h1_results <- broom::tidy(model_h1, conf.int = TRUE, exponentiate = TRUE) %>%
+     filter(term != "(Intercept)") %>%
+     dplyr::select(term, OR = estimate, lower = conf.low, upper = conf.high, p = p.value)
+ 
+print(h1_results)
+
+# Save to Word
+h1_results <- broom::tidy(model_h1, conf.int = TRUE, exponentiate = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  transmute(
+    term,
+    OR    = estimate,
+    lower = conf.low,
+    upper = conf.high,
+    p     = p.value
+  )
+
+# (optional) format numbers for readability
+h1_ft <- flextable(h1_results) %>%
+  colformat_num(j = c("OR","lower","upper"), digits = 2) %>%
+  colformat_num(j = "p", digits = 3) %>%
+  autofit()
+
+doc <- read_docx() %>%
+  body_add_par("H1 Logistic regression (Odds Ratios)", style = "heading 1") %>%
+  body_add_flextable(h1_ft)
+
+print(doc, target = "H1_model_results.docx")
+
+# single predictor model
+ model_age <- glm(adequate_knowledge ~ age_group, data = dat, family = binomial)
+ model_cadre <- glm(adequate_knowledge ~ cadre, data = dat, family = binomial)
+ model_exp <- glm(adequate_knowledge ~ years_exp, data = dat, family = binomial)
+ 
+ summary(model_age)
+ summary(model_cadre)
+ summary(model_exp)
+ 
+# Save to Word
+model_age   <- glm(adequate_knowledge ~ age_group, data = dat, family = binomial)
+model_cadre <- glm(adequate_knowledge ~ cadre,     data = dat, family = binomial)
+model_exp   <- glm(adequate_knowledge ~ years_exp, data = dat, family = binomial)
+
+to_or_table <- function(mod){
+  broom::tidy(mod, conf.int = TRUE, exponentiate = TRUE) %>%
+    filter(term != "(Intercept)") %>%
+    transmute(term,
+              OR = estimate, lower = conf.low, upper = conf.high, p = p.value)
+}
+
+ft_age <- flextable(to_or_table(model_age)) %>%
+  colformat_num(j = c("OR","lower","upper"), digits = 2) %>%
+  colformat_num(j = "p", digits = 3) %>%
+  autofit()
+
+ft_cadre <- flextable(to_or_table(model_cadre)) %>%
+  colformat_num(j = c("OR","lower","upper"), digits = 2) %>%
+  colformat_num(j = "p", digits = 3) %>%
+  autofit()
+
+ft_exp <- flextable(to_or_table(model_exp)) %>%
+  colformat_num(j = c("OR","lower","upper"), digits = 2) %>%
+  colformat_num(j = "p", digits = 3) %>%
+  autofit()
+
+doc <- read_docx() %>%
+  body_add_par("Single-predictor logistic regression (Odds Ratios)", style = "heading 1") %>%
+  body_add_par("Model: adequate_knowledge ~ age_group", style = "heading 2") %>%
+  body_add_flextable(ft_age) %>%
+  body_add_par("Model: adequate_knowledge ~ cadre", style = "heading 2") %>%
+  body_add_flextable(ft_cadre) %>%
+  body_add_par("Model: adequate_knowledge ~ years_exp", style = "heading 2") %>%
+  body_add_flextable(ft_exp)
+
+print(doc, target = "H1_model_predictor_results.docx")
+ 
+ # Combined model (only if individual models work)
+ model_h1 <- glm(adequate_knowledge ~ age_group + cadre + years_exp,
+                 data = dat, family = binomial)
+ 
+ # Save all results
+ sink("C:/Users/chris/Downloads/H1_All_Models.txt")
+ cat("=== Model by Age Group ===\n")
+ summary(model_age)
+ cat("\n=== Model by Cadre ===\n")
+ summary(model_cadre)
+ cat("\n=== Model by Years Experience ===\n")
+ summary(model_exp)
+ cat("\n=== Combined Model ===\n")
+ summary(model_h1)
+ sink()
+
+# For Q31 - Facility capacity
+ dat %>% 
+         dplyr::select(starts_with("x31_which_of_the_fol_health_centre_clinic")) %>%
+         names()
+# For Q32 - Barriers
+ dat %>%
+         dplyr::select(starts_with("x32_what_barriers_i_ing_and_treating_fgs")) %>%
+         names()
+		 
+ # ============================================================
+ # 2. AWARENESS VARIABLES
+ # ============================================================
+ 
+ dat <- dat %>%
+     mutate(
+         # Q12: Heard of urogenital schistosomiasis
+         heard_schisto = factor(case_when(
+             # UPDATE after checking values
+             ever_heard_of_urogenital_schis == "yes" ~ "Yes",
+             ever_heard_of_urogenital_schis == "no" ~ "No",
+             TRUE ~ NA_character_
+         ), levels = c("No", "Yes")),
+         
+         # Q13: Heard of FGS specifically
+         heard_fgs = factor(case_when(
+             # UPDATE after checking values
+             str_detect(x13_have_you_heard_o_schistosomiasis_fgs, "yes") ~ "Yes",
+             str_detect(x13_have_you_heard_o_schistosomiasis_fgs, "no") ~ "No",
+             TRUE ~ NA_character_
+         ), levels = c("No", "Yes")),
+         
+         # Source of information (for those who heard of it)
+         source_info = factor(if_you_answered_yes_where_di)
+     )
+	 
+ # ============================================================
+ # 3. ATTITUDES/PERCEPTIONS
+ # ============================================================
+ 
+ dat <- dat %>%
+     mutate(
+         # Q21: Severity perception (ordinal)
+         severity = factor(case_when(
+             # UPDATE after checking values
+             str_detect(x21_how_severe_do_yo_is_as_a_health_issue, "very") ~ "Very severe",
+             str_detect(x21_how_severe_do_yo_is_as_a_health_issue, "somewhat") ~ "Somewhat severe",
+             str_detect(x21_how_severe_do_yo_is_as_a_health_issue, "not") ~ "Not severe",
+             TRUE ~ NA_character_
+         ), levels = c("Not severe", "Somewhat severe", "Very severe"), ordered = TRUE),
+         
+         # Q22: Underdiagnosis in healthcare settings
+         underdiagnosed = factor(case_when(
+             # UPDATE after checking values
+             str_detect(x22_do_you_think_tha_healthcare_settings, "yes") ~ "Yes",
+             str_detect(x22_do_you_think_tha_healthcare_settings, "no") ~ "No",
+             TRUE ~ NA_character_
+         ), levels = c("No", "Yes")),
+         
+         # Q23: Should be integrated in health programs
+         integrate_programs = factor(case_when(
+             # UPDATE after checking values
+             str_detect(x23_should_fgs_aware_en_s_health_programs, "yes") ~ "Yes",
+             str_detect(x23_should_fgs_aware_en_s_health_programs, "no") ~ "No",
+             TRUE ~ NA_character_
+         ), levels = c("No", "Yes")),
+         
+         # Attitude/perception score (0-3, simple count of "positive" responses)
+         attitude_score = case_when(
+             severity == "Very severe" ~ 1,
+             TRUE ~ 0
+         ) + 
+             case_when(
+                 underdiagnosed == "Yes" ~ 1,
+                 TRUE ~ 0
+             ) +
+             case_when(
+                 integrate_programs == "Yes" ~ 1,
+                 TRUE ~ 0
+             )
+     )
+	 
+ # ============================================================
+ # 4. PRACTICES
+ # ============================================================
+ 
+ dat <- dat %>%
+     mutate(
+         # Q24: How often encounter FGS in practice (ordinal)
+         encounter_freq = factor(case_when(
+             # UPDATE after checking values
+             str_detect(x24_how_often_do_you_fgs_in_your_practice, "always|often") ~ "Often",
+             str_detect(x24_how_often_do_you_fgs_in_your_practice, "sometimes|rarely") ~ "Sometimes",
+             str_detect(x24_how_often_do_you_fgs_in_your_practice, "never") ~ "Never",
+             TRUE ~ NA_character_
+         ), levels = c("Never", "Sometimes", "Often"), ordered = TRUE),
+         
+         # Q25: Ever treated a confirmed FGS case
+         ever_treated = factor(case_when(
+             # UPDATE after checking values
+             str_detect(have_you_ever_treated_a_patien, "yes") ~ "Yes",
+             str_detect(have_you_ever_treated_a_patien, "no") ~ "No",
+             TRUE ~ NA_character_
+         ), levels = c("No", "Yes")),
+         
+         # Q28: Screen for infertility as part of FGS assessment
+         screen_infertility = factor(case_when(
+             # UPDATE after checking values
+             str_detect(x28_in_your_practice_infertility_for_fgs, "yes") ~ "Yes",
+             str_detect(x28_in_your_practice_infertility_for_fgs, "no") ~ "No",
+            TRUE ~ NA_character_
+         ), levels = c("No", "Yes"))
+     )
+	 
+ # ============================================================
+ # 5. FACILITY CAPACITY (Q31 - Multi-select)
+ # ============================================================
+ 
+ # Get Q31 column names
+ q31_cols <- names(dat)[str_detect(names(dat), "x31_which_of_the_fol_health_centre_clinic")]
+ 
+ # Create binary indicators for each tool
+ dat <- dat %>%
+     mutate(
+         tool_praziquantel = ifelse(!is.na(x31_which_of_the_fol_health_centre_clinic_praziquantel), 1, 0),
+         tool_microscopy = ifelse(!is.na(x31_which_of_the_fol_health_centre_clinic_microscopy), 1, 0),
+         tool_urinalysis = ifelse(!is.na(x31_which_of_the_fol_health_centre_clinic_urinalysis_test_strips), 1, 0),
+         tool_test_kit = ifelse(!is.na(x31_which_of_the_fol_health_centre_clinic_schistosome_test_kit_with_polycarbonate), 1, 0),
+         tool_colposcope = ifelse(!is.na(x31_which_of_the_fol_health_centre_clinic_colposcope), 1, 0),
+         tool_none = ifelse(!is.na(x31_which_of_the_fol_health_centre_clinic_none), 1, 0),
+         
+         # Total number of tools available (0-5, excluding "none")
+         n_tools = tool_praziquantel + tool_microscopy + tool_urinalysis + 
+             tool_test_kit + tool_colposcope
+     )
+	 
+ # ============================================================
+ # 6. BARRIERS (Q32 - Multi-select)
+ # ============================================================
+ 
+ dat <- dat %>%
+     mutate(
+         barrier_awareness = ifelse(!is.na(x32_what_barriers_i_ing_and_treating_fgs_lack_of_awareness_among_patients), 1, 0),
+         barrier_diagnostic = ifelse(!is.na(x32_what_barriers_i_ing_and_treating_fgs_limited_diagnostic_tools), 1, 0),
+         barrier_training = ifelse(!is.na(x32_what_barriers_i_ing_and_treating_fgs_inadequate_training_of_healthcare_worker), 1, 0),
+         barrier_stigma = ifelse(!is.na(x32_what_barriers_i_ing_and_treating_fgs_stigma_around_the_disease), 1, 0),
+         barrier_treatment = ifelse(!is.na(x32_what_barriers_i_ing_and_treating_fgs_lack_of_treatment_options), 1, 0),
+         barrier_dk = ifelse(!is.na(x32_what_barriers_i_ing_and_treating_fgs_i_do_not_know), 1, 0),
+         
+         # Total number of barriers selected
+         n_barriers = barrier_awareness + barrier_diagnostic + barrier_training + 
+             barrier_stigma + barrier_treatment
+     )
+	 
+# ============================================================
+ # 7. DESCRIPTIVE TABLES
+ # ============================================================
+ 
+ # Table 1: Demographics
+ table1 <- dat %>%
+     dplyr::select(gender, age_group, cadre, facility_type, years_exp) %>%
+     tbl_summary(
+         statistic = list(all_categorical() ~ "{n} ({p}%)"),
+         digits = all_categorical() ~ c(0, 1),
+         label = list(
+             gender = "Gender",
+             age_group = "Age Group",
+             cadre = "Profession/Cadre",
+             facility_type = "Facility Type",
+             years_exp = "Years of Experience"
+         )
+     ) %>%
+     modify_header(label = "**Characteristic**") %>%
+     modify_caption("**Table 1: Demographics (N=60)**") %>%
+     bold_labels()
+ 
+ # Table 2: Awareness
+ table2 <- dat %>%
+     dplyr::select(heard_schisto, heard_fgs) %>%
+     tbl_summary(
+         statistic = list(all_categorical() ~ "{n} ({p}%)"),
+         label = list(heard_schisto = "Heard of urogenital schistosomiasis",
+                      heard_fgs = "Heard of FGS")
+     ) %>%
+     modify_caption("**Table 2: Awareness**") %>%
+     bold_labels()
+ 
+ # Table 3: Knowledge
+ table3 <- dat %>%
+     dplyr::select(knowledge_score, adequate_knowledge) %>%
+     tbl_summary(
+         statistic = list(
+             all_continuous() ~ "{mean} ({sd})",
+             all_categorical() ~ "{n} ({p}%)"
+         )
+     ) %>%
+     modify_caption("**Table 3: Knowledge**") %>%
+     bold_labels()
+ 
+ # Table 4: Attitudes
+ table4 <- dat %>%
+     dplyr::select(severity, underdiagnosed, integrate_programs, attitude_score) %>%
+     tbl_summary(
+         statistic = list(
+             all_continuous() ~ "{mean} ({sd})",
+             all_categorical() ~ "{n} ({p}%)"
+         )
+     ) %>%
+     modify_caption("**Table 4: Attitudes/Perceptions**") %>%
+     bold_labels()
+ 
+ # Table 5: Practices
+ table5 <- dat %>%
+     dplyr::select(encounter_freq, ever_treated, screen_infertility) %>%
+     tbl_summary() %>%
+     modify_caption("**Table 5: Practices**") %>%
+     bold_labels()
+ 
+ # Table 6: Facility capacity
+ table6 <- dat %>%
+     dplyr::select(tool_praziquantel:tool_colposcope, n_tools) %>%
+     tbl_summary(
+         statistic = list(all_categorical() ~ "{n} ({p}%)",
+                          all_continuous() ~ "{mean} ({sd})")
+     ) %>%
+     modify_caption("**Table 6: Facility Capacity**") %>%
+     bold_labels()
+ 
+ # Table 7: Barriers
+ table7 <- dat %>%
+     dplyr::select(barrier_awareness:barrier_stigma, n_barriers) %>%
+     tbl_summary(
+         statistic = list(all_categorical() ~ "{n} ({p}%)",
+                          all_continuous() ~ "{mean} ({sd})")
+     ) %>%
+     modify_caption("**Table 7: Barriers**") %>%
+     bold_labels()
+	 
+save_as_docx(
+  "Table 1: Demographics" = as_flex_table(table1),
+  "Table 2: Awareness" = as_flex_table(table2),
+  "Table 3: Knowledge" = as_flex_table(table3),
+  "Table 4: Attitudes/Perceptions" = as_flex_table(table4),
+  "Table 5: Practices" = as_flex_table(table5),
+  "Table 6: Facility Capacity" = as_flex_table(table6),
+  "Table 7: Barriers" = as_flex_table(table7),
+  path = "Descriptive_Tables.docx"
+)
+
+ add_section <- function(doc, title, varname, data = dat) {
+  
+  # check variable exists
+  if (!varname %in% names(data)) {
+    doc <- body_add_par(doc, title, style = "heading 2")
+    doc <- body_add_par(doc, paste("Variable not found:", varname), style = "Normal")
+    return(doc)
+  }
+  
+  # frequency table
+  tab <- data %>%
+    count(.data[[varname]], name = "Frequency") %>%
+    mutate(Percent = round(100 * Frequency / sum(Frequency), 1)) %>%
+    rename(Response = 1)
+  
+  # replace NA for display
+  tab$Response <- ifelse(is.na(tab$Response), "Missing", as.character(tab$Response))
+  
+  ft <- flextable(tab)
+  ft <- autofit(ft)
+  
+  doc <- body_add_par(doc, title, style = "heading 2")
+  doc <- body_add_flextable(doc, ft)
+  doc <- body_add_par(doc, "", style = "Normal")
+  
+  return(doc)
+}
+doc <- read_docx()
+
+# Knowledge items
+doc <- add_section(doc, "Q14: Can schisto lead to FGS", "x14_can_urogenital_s_ital_schistosomiasis")
+doc <- add_section(doc, "Q15: Primary cause of FGS", "x15_what_do_you_thin_primary_cause_of_fgs")
+doc <- add_section(doc, "Q17: Mode of transmission", "x17_what_is_the_mode_transmission_of_fgs")
+doc <- add_section(doc, "Q19: HIV risk", "x19_do_you_know_that_ncreased_risk_of_hiv")
+doc <- add_section(doc, "Q20: Preventable", "do_you_think_fgs_is_preventabl")
+doc <- add_section(doc, "Q27: Praziquantel", "x27_is_praziquantel_the_treatment_of_fgs")
+
+# Attitudes
+doc <- add_section(doc, "Q21: Severity", "x21_how_severe_do_yo_is_as_a_health_issue")
+doc <- add_section(doc, "Q22: Missed diagnosis", "x22_do_you_think_tha_healthcare_settings")
+doc <- add_section(doc, "Q23: Integrate programs", "x23_should_fgs_aware_en_s_health_programs")
+
+# Practices
+doc <- add_section(doc, "Q24: Encounter frequency", "x24_how_often_do_you_fgs_in_your_practice")
+doc <- add_section(doc, "Q25: Ever treated", "have_you_ever_treated_a_patien")
+doc <- add_section(doc, "Q28: Screen infertility", "x28_in_your_practice_infertility_for_fgs")
+
+# Awareness
+doc <- add_section(doc, "Q12: Heard of schisto", "ever_heard_of_urogenital_schis")
+doc <- add_section(doc, "Q13: Heard of FGS", "x13_have_you_heard_o_schistosomiasis_fgs")
+
+print(doc, target = "Survey_Frequency_Tables.docx")
+
+# better version
+add_section <- function(doc, title, varname, data = dat) {
+  
+  if (!varname %in% names(data)) {
+    doc <- body_add_par(doc, title, style = "heading 2")
+    doc <- body_add_par(doc, paste("Variable not found:", varname), style = "Normal")
+    return(doc)
+  }
+  
+  vec <- data[[varname]]
+  vec <- ifelse(is.na(vec), "Missing", as.character(vec))
+  
+  tab <- as.data.frame(table(vec), stringsAsFactors = FALSE)
+  names(tab) <- c("Response", "Frequency")
+  tab$Percent <- round(100 * tab$Frequency / sum(tab$Frequency), 1)
+  
+  ft <- flextable(tab)
+  ft <- autofit(ft)
+  
+  doc <- body_add_par(doc, title, style = "heading 2")
+  doc <- body_add_flextable(doc, ft)
+  doc <- body_add_par(doc, "", style = "Normal")
+  
+  return(doc)
+}
+
+# ============================================================
+# 6. BARRIERS (Q32 - Multi-select)
+# ============================================================
+
+
+dat <- dat %>%
+  mutate(
+    x32_barriers = coalesce(x32_what_barriers_i_ing_and_treating_fgs, ""),
+    
+    barrier_awareness = ifelse(str_detect(x32_barriers, "lack_of_awareness_among_patients"), 1, 0),
+    barrier_diagnostic = ifelse(str_detect(x32_barriers, "limited_diagnostic_tools"), 1, 0),
+    barrier_training = ifelse(str_detect(x32_barriers, "inadequate_training_of_healthcare_worker"), 1, 0),
+    barrier_stigma = ifelse(str_detect(x32_barriers, "stigma_around_the_disease"), 1, 0),
+    barrier_treatment = ifelse(str_detect(x32_barriers, "lack_of_treatment_options"), 1, 0),
+    barrier_dk = ifelse(str_detect(x32_barriers, "i_do_not_know"), 1, 0),
+
+    # Total number of actual barriers selected (excluding "don't know")
+    n_barriers = barrier_awareness + barrier_diagnostic + barrier_training +
+                 barrier_stigma + barrier_treatment
+  )
+  
+summary(dat$n_barriers)
+
+colSums(dat[, c(
+  "barrier_awareness",
+  "barrier_diagnostic",
+  "barrier_training",
+  "barrier_stigma",
+  "barrier_treatment",
+  "barrier_dk"
+)], na.rm = TRUE)
+
+table7 <- dat %>%
+  dplyr::select(
+    barrier_awareness,
+    barrier_diagnostic,
+    barrier_training,
+    barrier_stigma,
+    barrier_treatment,
+    barrier_dk,
+    n_barriers
+  ) %>%
+  tbl_summary(
+    statistic = list(
+      all_categorical() ~ "{n} ({p}%)",
+      all_continuous() ~ "{mean} ({sd})"
+    ),
+    label = list(
+      barrier_awareness ~ "Lack of awareness among patients",
+      barrier_diagnostic ~ "Limited diagnostic tools",
+      barrier_training ~ "Inadequate training of healthcare workers",
+      barrier_stigma ~ "Stigma around the disease",
+      barrier_treatment ~ "Lack of treatment options",
+      barrier_dk ~ "Do not know",
+      n_barriers ~ "Number of barriers reported"
+    )
+  ) %>%
+  modify_caption("**Table 7: Barriers**") %>%
+  bold_labels()
+  
+  # ============================================================
+# 6. BARRIERS (Q32 - Multi-select)
+# ============================================================
+
+library(dplyr)
+library(stringr)
+library(gtsummary)
+
+dat <- dat %>%
+  mutate(
+    x32_barriers = str_squish(coalesce(x32_what_barriers_i_ing_and_treating_fgs, "")),
+    
+    barrier_awareness = ifelse(str_detect(x32_barriers, "lack_of_awareness_among_patients"), 1, 0),
+    barrier_diagnostic = ifelse(str_detect(x32_barriers, "limited_diagnostic_tools"), 1, 0),
+    barrier_training = ifelse(str_detect(x32_barriers, "inadequate_training_of_healthcare_worker"), 1, 0),
+    barrier_stigma = ifelse(str_detect(x32_barriers, "stigma_around_the_disease"), 1, 0),
+    barrier_treatment = ifelse(str_detect(x32_barriers, "lack_of_treatment_options"), 1, 0),
+    barrier_dk = ifelse(str_detect(x32_barriers, "i_do_not_know"), 1, 0),
+
+    # total number of actual barriers selected, excluding "do not know"
+    n_barriers = barrier_awareness + barrier_diagnostic + barrier_training +
+                 barrier_stigma + barrier_treatment
+  )
+
+# Optional checks
+summary(dat$n_barriers)
+colSums(dat[, c(
+  "barrier_awareness",
+  "barrier_diagnostic",
+  "barrier_training",
+  "barrier_stigma",
+  "barrier_treatment",
+  "barrier_dk"
+)], na.rm = TRUE)
+
+# modify the words on barrier and others
+# ============================================================
+# 7. DESCRIPTIVE TABLES
+# ============================================================
+
+# Table 1: Demographics
+table1 <- dat %>%
+  dplyr::select(gender, age_group, cadre, facility_type, years_exp) %>%
+  tbl_summary(
+    statistic = list(all_categorical() ~ "{n} ({p}%)"),
+    digits = all_categorical() ~ c(0, 1),
+    label = list(
+      gender = "Gender",
+      age_group = "Age Group",
+      cadre = "Profession/Cadre",
+      facility_type = "Facility Type",
+      years_exp = "Years of Experience"
+    )
+  ) %>%
+  modify_header(label = "**Characteristic**") %>%
+  modify_caption("**Table 1: Demographics (N=60)**") %>%
+  bold_labels()
+
+# Table 2: Awareness
+table2 <- dat %>%
+  dplyr::select(heard_schisto, heard_fgs) %>%
+  tbl_summary(
+    statistic = list(all_categorical() ~ "{n} ({p}%)"),
+    label = list(
+      heard_schisto = "Heard of urogenital schistosomiasis",
+      heard_fgs = "Heard of FGS"
+    )
+  ) %>%
+  modify_caption("**Table 2: Awareness**") %>%
+  bold_labels()
+
+# Table 3: Knowledge
+table3 <- dat %>%
+  dplyr::select(knowledge_score, adequate_knowledge) %>%
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    label = list(
+      knowledge_score = "Knowledge score",
+      adequate_knowledge = "Adequate knowledge"
+    )
+  ) %>%
+  modify_caption("**Table 3: Knowledge**") %>%
+  bold_labels()
+
+# Table 4: Attitudes
+table4 <- dat %>%
+  dplyr::select(severity, underdiagnosed, integrate_programs, attitude_score) %>%
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    label = list(
+      severity = "Perceived severity",
+      underdiagnosed = "FGS is underdiagnosed",
+      integrate_programs = "Support integration into health programs",
+      attitude_score = "Attitude score"
+    )
+  ) %>%
+  modify_caption("**Table 4: Attitudes/Perceptions**") %>%
+  bold_labels()
+
+# Table 5: Practices
+table5 <- dat %>%
+  dplyr::select(encounter_freq, ever_treated, screen_infertility) %>%
+  tbl_summary(
+    statistic = list(all_categorical() ~ "{n} ({p}%)"),
+    label = list(
+      encounter_freq = "Frequency of encountering FGS",
+      ever_treated = "Ever treated a patient with FGS",
+      screen_infertility = "Screens infertility patients for FGS"
+    )
+  ) %>%
+  modify_caption("**Table 5: Practices**") %>%
+  bold_labels()
+
+# Table 6: Facility capacity
+table6 <- dat %>%
+  dplyr::select(tool_praziquantel:tool_colposcope, n_tools) %>%
+  tbl_summary(
+    statistic = list(
+      all_categorical() ~ "{n} ({p}%)",
+      all_continuous() ~ "{mean} ({sd})"
+    ),
+    label = list(
+      n_tools = "Number of tools/resources available"
+    )
+  ) %>%
+  modify_caption("**Table 6: Facility Capacity**") %>%
+  bold_labels()
+
+# Table 7: Barriers
+table7 <- dat %>%
+  dplyr::select(
+    barrier_awareness,
+    barrier_diagnostic,
+    barrier_training,
+    barrier_stigma,
+    barrier_treatment,
+    barrier_dk,
+    n_barriers
+  ) %>%
+  tbl_summary(
+    statistic = list(
+      all_categorical() ~ "{n} ({p}%)",
+      all_continuous() ~ "{mean} ({sd})"
+    ),
+    label = list(
+      barrier_awareness = "Lack of awareness among patients",
+      barrier_diagnostic = "Limited diagnostic tools",
+      barrier_training = "Inadequate training of healthcare workers",
+      barrier_stigma = "Stigma around the disease",
+      barrier_treatment = "Lack of treatment options",
+      barrier_dk = "Do not know",
+      n_barriers = "Number of barriers reported"
+    )
+  ) %>%
+  modify_caption("**Table 7: Barriers**") %>%
+  bold_labels()
+  
+# ============================================================
+ # 8. INFERENTIAL ANALYSIS
+ # ============================================================
+ 
+ # ---- H1: Factors associated with adequate knowledge ----
+ model_h1 <- glm(adequate_knowledge ~ gender + age_group + cadre + years_exp + facility_type,
+                 data = dat, family = binomial(link = "logit"))
+				 
+table(dat$adequate_knowledge, useNA = "ifany")
+table(dat$gender, useNA = "ifany")
+table(dat$age_group, useNA = "ifany")
+table(dat$cadre, useNA = "ifany")
+table(dat$years_exp, useNA = "ifany")
+table(dat$facility_type, useNA = "ifany")
+
+model_dat <- dat %>%
+  dplyr::select(adequate_knowledge, gender, age_group, cadre, years_exp, facility_type) %>%
+  tidyr::drop_na()
+
+table(model_dat$gender, useNA = "ifany")
+table(model_dat$age_group, useNA = "ifany")
+table(model_dat$cadre, useNA = "ifany")
+table(model_dat$years_exp, useNA = "ifany")
+table(model_dat$facility_type, useNA = "ifany")
+
+dat <- dat %>%
+  mutate(
+    adequate_knowledge = as.factor(adequate_knowledge),
+    gender = as.factor(gender),
+    age_group = as.factor(age_group),
+    cadre = as.factor(cadre),
+    years_exp = as.factor(years_exp),
+    facility_type = as.factor(facility_type)
+  )
+  
+# Get Odds Ratios with 95% CI
+ h1_results <- broom::tidy(model_h1, conf.int = TRUE, exponentiate = TRUE) %>%
+     filter(term != "(Intercept)") %>%
+     dplyr::select(term, OR = estimate, lower = conf.low, upper = conf.high, p = p.value)
+ 
+ print(h1_results)
+
+ doc <- read_docx()
+ 
+ # Title
+ doc <- body_add_flextable(doc,
+                           flextable(data.frame(
+                               Analysis = "H1: Factors Associated with Adequate FGS Knowledge",
+                               N = nrow(dat),
+                               Outcome = "Adequate knowledge (≥70% correct)",
+                               Adequate = sum(dat$adequate_knowledge == "Adequate"),
+                               Inadequate = sum(dat$adequate_knowledge == "Inadequate")
+                           )) %>% theme_box()
+ )
+ 
+ doc <- body_add_par(doc, "")
+ 
+ # Results table
+ doc <- body_add_flextable(doc,
+                           flextable(h1_results) %>%
+                               set_header_labels(
+                                   term = "Predictor",
+                                   OR = "Odds Ratio",
+                                   lower = "Lower 95% CI",
+                                   upper = "Upper 95% CI",
+                                   p = "P-value"
+                               ) %>%
+                               theme_box() %>%
+                               autofit()
+ )
+ 
+ doc <- body_add_par(doc, "")
+ 
+ # Model summary note
+ doc <- body_add_par(doc, 
+                     paste("Note: Variables removed due to no variation: gender (all Female), facility_type (all Primary Health Care)"))
+ 
+ print(doc, target = "C:/Users/chris/Downloads/H1_Knowledge_Results.docx")
+ 
+ # Create forest plot data
+ forest_data <- h1_results %>%
+     mutate(
+         # Clean up term names
+         term = case_when(
+             term == "age_groupYoung Adults (28-37 years)" ~ "Young Adults (28-37 yrs)",
+             term == "age_groupMiddle age (38-47 years)" ~ "Middle Age (38-47 yrs)",
+             term == "age_groupOlder Adults (48 years and above)" ~ "Older Adults (48+ yrs)",
+             term == "cadre_cleanJCHEW" ~ "JCHEW (vs CHEW)",
+             term == "cadre_cleanNurse/Midwife" ~ "Nurse/Midwife (vs CHEW)",
+             term == "cadre_cleanOthers" ~ "Others (vs CHEW)",
+             term == "years_exp_clean1-5 years" ~ "1-5 yrs (vs <1 yr)",
+             term == "years_exp_clean6-10 years" ~ "6-10 yrs (vs <1 yr)",
+             term == "years_exp_clean11-15 years" ~ "11-15 yrs (vs <1 yr)",
+             term == "years_exp_clean16 and above" ~ "16+ yrs (vs <1 yr)",
+             term == "years_exp_cleanLess than 1 year" ~ "1-5 yrs (vs <1 yr)",
+             TRUE ~ term
+         ),
+         # Add group labels
+         group = case_when(
+             str_detect(term, "Young|Middle|Older") ~ "Age Group",
+             str_detect(term, "JCHEW|Nurse|Others") ~ "Cadre",
+             str_detect(term, "yrs") ~ "Years of Experience",
+             TRUE ~ "Other"
+         )
+     )
+	 
+# Create the forest plot
+ p_forest <- ggplot(forest_data, aes(x = OR, y = reorder(term, OR))) +
+     geom_point(size = 3, color = "steelblue") +
+     geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2, color = "steelblue") +
+     geom_vline(xintercept = 1, linetype = "dashed", color = "red", linewidth = 0.8) +
+     scale_x_log10(
+         breaks = c(0.1, 0.5, 1, 2, 5, 10, 50),
+         labels = c("0.1", "0.5", "1", "2", "5", "10", "50")
+     ) +
+     labs(
+         title = "Factors Associated with Adequate FGS Knowledge",
+         subtitle = "Adjusted Odds Ratios (95% CI) from Multivariable Logistic Regression",
+         x = "Adjusted Odds Ratio (log scale)",
+         y = NULL,
+         caption = "Red dashed line = no effect (OR = 1). Ref: Youth, CHEW, <1 year experience.\nGender and facility type excluded (zero variance). N = 60."
+     ) +
+     theme_minimal() +
+     theme(
+         plot.title = element_text(face = "bold", size = 14),
+         plot.subtitle = element_text(size = 10, color = "gray40"),
+         axis.text.y = element_text(size = 10),
+         panel.grid.minor = element_blank()
+     )
+	 
+ # Save as Word document
+ doc <- read_docx()
+ doc <- body_add_gg(doc, value = p_forest, width = 8, height = 6)
+`height` was translated to `width`.
+ print(doc, target = "C:/Users/chris/Downloads/Figure5_Forest_Plot.docx")
+ 
+ # Also save as PDF
+ ggsave("C:/Users/chris/Downloads/Figure5_Forest_Plot.pdf", p_forest, width = 10, height = 6)
+`height` was translated to `width`.
+ 
+ cat("Forest plot saved!\n")
+ 
+ # ============================================
+ # FIGURE 1: Knowledge Score Distribution
+ # ============================================
+ 
+ library(ggplot2)
+ library(officer)
+ 
+ p1 <- ggplot(dat, aes(x = knowledge_score)) +
+     geom_bar(fill = "steelblue", color = "white", width = 0.7) +
+     geom_vline(xintercept = 4.9, linetype = "dashed", color = "red", linewidth = 0.8) +
+     annotate("text", x = 3.5, y = Inf, label = "70% threshold\n(≥5 correct)",
+              vjust = 2, color = "red", size = 3.5, fontface = "italic") +
+     scale_x_continuous(breaks = 1:7) +
+     labs(title = "Distribution of FGS Knowledge Scores",
+          subtitle = "N = 60 healthcare workers | Mean = 5.02 | Median = 6",
+          x = "Knowledge Score (1–7)",
+          y = "Number of Respondents") +
+     theme_minimal() +
+     theme(plot.title = element_text(face = "bold"))
+ 
+ doc <- read_docx()
+ doc <- body_add_gg(doc, value = p1, width = 7, height = 5)
+ print(doc, target = "C:/Users/chris/Downloads/Figure1_Knowledge_Score.docx")
+ 
+ # ============================================
+ # FIGURE 2: Knowledge by Gender
+ # ============================================
+ 
+ library(dplyr)
+ 
+ gender_knowledge <- dat %>%
+     count(gender, adequate_knowledge) %>%
+     group_by(gender) %>%
+     mutate(pct = n / sum(n) * 100)
+ 
+ p2 <- ggplot(gender_knowledge, aes(x = gender, y = pct, fill = adequate_knowledge)) +
+     geom_col(position = "dodge", width = 0.6) +
+     geom_text(aes(label = paste0(round(pct, 1), "%")),
+               position = position_dodge(width = 0.6), vjust = -0.5, size = 3.5) +
+     scale_fill_manual(values = c("Inadequate" = "#CD5C5C", "Adequate" = "#2E8B57")) +
+     labs(title = "FGS Knowledge Adequacy by Gender",
+          subtitle = "N = 60 healthcare workers",
+          x = "Gender", y = "Percentage (%)",
+          fill = "Knowledge Level") +
+     scale_y_continuous(limits = c(0, 100)) +
+     theme_minimal() +
+     theme(plot.title = element_text(face = "bold"))
+ 
+ doc <- read_docx()
+ doc <- body_add_gg(doc, value = p2, width = 7, height = 5)
+ print(doc, target = "C:/Users/chris/Downloads/Figure2_Knowledge_by_Gender.docx")
+ 
+  # ============================================
+ # FIGURE 3: Barriers (Horizontal Bar)
+ # ============================================
+ 
+ barrier_df <- data.frame(
+     Barrier = c("Limited diagnostic tools", "Inadequate training",
+                 "Lack of patient awareness", "Lack of treatment options", "Stigma"),
+     n = c(38, 38, 35, 25, 15),
+     pct = c(63.3, 63.3, 58.3, 41.7, 25.0)
+ )
+ 
+ p3 <- ggplot(barrier_df, aes(x = fct_reorder(Barrier, pct), y = pct)) +
+     geom_col(fill = "darkred", width = 0.7) +
+     geom_text(aes(label = paste0(pct, "%")), hjust = -0.2, size = 3.5) +
+     coord_flip() +
+     scale_y_continuous(limits = c(0, 80)) +
+     labs(title = "Barriers to FGS Diagnosis and Management",
+          subtitle = "N = 60 healthcare workers | Multiple responses allowed",
+          x = NULL, y = "Percentage of Respondents (%)") +
+     theme_minimal() +
+     theme(plot.title = element_text(face = "bold"))
+ 
+ doc <- read_docx()
+ doc <- body_add_gg(doc, value = p3, width = 8, height = 5)
+ print(doc, target = "C:/Users/chris/Downloads/Figure3_Barriers.docx")
+ 
+  # ============================================
+ # FIGURE 4: Forest Plot (H1)
+ # ============================================
+ 
+ h1_results <- broom::tidy(model_h1, conf.int = TRUE, exponentiate = TRUE) %>%
+     filter(term != "(Intercept)") %>%
+     dplyr::select(term, OR = estimate, lower = conf.low, upper = conf.high, p = p.value)
+ 
+ forest_data <- h1_results %>%
+     mutate(
+         term = case_when(
+             term == "genderMale" ~ "Male (vs Female)",
+             term == "age_groupYoung Adults (28-37 years)" ~ "Young Adults (28-37 yrs)",
+             term == "age_groupMiddle age (38-47 years)" ~ "Middle Age (38-47 yrs)",
+             term == "age_groupOlder Adults (48 years and above)" ~ "Older Adults (48+ yrs)",
+             term == "cadre_cleanJCHEW" ~ "JCHEW (vs CHEW)",
+             term == "cadre_cleanNurse/Midwife" ~ "Nurse/Midwife (vs CHEW)",
+             term == "cadre_cleanOthers" ~ "Others (vs CHEW)",
+             term == "years_exp_clean1-5 years" ~ "1-5 yrs (vs <1 yr)",
+             term == "years_exp_clean6-10 years" ~ "6-10 yrs (vs <1 yr)",
+             term == "years_exp_clean11-15 years" ~ "11-15 yrs (vs <1 yr)",
+             term == "years_exp_clean16 and above" ~ "16+ yrs (vs <1 yr)",
+             term == "years_exp_cleanLess than 1 year" ~ "<1 yr (ref)",
+             TRUE ~ term
+         ),
+         group = case_when(
+             str_detect(term, "Male|Female") ~ "Gender",
+             str_detect(term, "Young|Middle|Older") ~ "Age Group",
+             str_detect(term, "JCHEW|Nurse|Others") ~ "Cadre",
+             str_detect(term, "yrs") ~ "Years of Experience",
+             TRUE ~ "Other"
+         )
+     )
+ 
+ p4 <- ggplot(forest_data, aes(x = OR, y = reorder(term, OR))) +
+     geom_point(size = 3, color = "steelblue") +
+     geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2, color = "steelblue") +
+     geom_vline(xintercept = 1, linetype = "dashed", color = "red", linewidth = 0.8) +
+     scale_x_log10(breaks = c(0.1, 0.5, 1, 2, 5, 10, 50),
+                   labels = c("0.1", "0.5", "1", "2", "5", "10", "50")) +
+     labs(title = "Factors Associated with Adequate FGS Knowledge",
+          subtitle = "Adjusted Odds Ratios (95% CI) — Multivariable Logistic Regression",
+          x = "Adjusted Odds Ratio (log scale)", y = NULL,
+          caption = "Red dashed line = no effect (OR = 1). All p > 0.05.\nFacility type excluded (zero variance). N = 60.") +
+     theme_minimal() +
+     theme(plot.title = element_text(face = "bold", size = 14),
+           plot.subtitle = element_text(size = 10, color = "gray40"),
+           panel.grid.minor = element_blank())
+ 
+ doc <- read_docx()
+ doc <- body_add_gg(doc, value = p4, width = 10, height = 7)
+ # `height` was translated to `width`.
+ print(doc, target = "C:/Users/chris/Downloads/Figure4_Forest_Plot.docx")
+ 
+  # ============================================
+ # FIGURE 5: Awareness Cascade
+ # ============================================
+ 
+ cascade_df <- data.frame(
+     Step = factor(c("Aware of urogenital\nschistosomiasis",
+                     "Aware of FGS\nspecifically",
+                     "Adequate\nknowledge",
+                     "Ever treated\na case"),
+                   levels = c("Aware of urogenital\nschistosomiasis",
+                              "Aware of FGS\nspecifically",
+                              "Adequate\nknowledge",
+                              "Ever treated\na case")),
+     n = c(58, 26, 44, 3),
+     pct = c(96.7, 43.3, 73.3, 5.0)
+ )
+ 
+ p5 <- ggplot(cascade_df, aes(x = Step, y = pct, fill = Step)) +
+     geom_col(width = 0.7, show.legend = FALSE) +
+     geom_text(aes(label = paste0(n, " (", pct, "%)")), vjust = -0.5, size = 3.5) +
+     scale_fill_manual(values = c("#2E8B57", "#4682B4", "#DAA520", "#CD5C5C")) +
+     scale_y_continuous(limits = c(0, 115)) +
+     labs(title = "FGS Awareness Cascade Among Healthcare Workers",
+          subtitle = "N = 60",
+          x = NULL, y = "Percentage (%)") +
+     theme_minimal() +
+     theme(plot.title = element_text(face = "bold"),
+           axis.text.x = element_text(size = 9))
+ 
+ doc <- read_docx()
+ doc <- body_add_gg(doc, value = p5, width = 8, height = 5)
+ print(doc, target = "C:/Users/chris/Downloads/Figure5_Awareness_Cascade.docx")
+
+ 
+ cat("All 5 figures saved to Downloads!\n")
+ cat("=== Q14 ===\n")
+ # === Q14 ===
+ print(table(dat$x14_can_urogenital_s_ital_schistosomiasis, useNA="ifany"))
+
+ cat("=== Q15 ===\n")
+ # === Q15 ===
+ print(table(dat$x15_what_do_you_thin_primary_cause_of_fgs, useNA="ifany"))
+
+ cat("=== Q17 ===\n")
+ # === Q17 ===
+ print(table(dat$x17_what_is_the_mode_transmission_of_fgs, useNA="ifany"))
+
+ cat("=== Q19 ===\n")
+ # === Q19 ===
+ print(table(dat$x19_do_you_know_that_ncreased_risk_of_hiv, useNA="ifany"))
+
+ cat("=== Q20 ===\n")
+ # === Q20 ===
+ print(table(dat$do_you_think_fgs_is_preventabl, useNA="ifany"))
+
+ cat("=== Q27 ===\n")
+ # === Q27 ===
+ print(table(dat$x27_is_praziquantel_the_treatment_of_fgs, useNA="ifany"))
+
+ # ============================================================
+# IMPROVED SCRIPT - Clean Forest Plot (matches your latest image)
+#   * Cleaner x-axis labels (no "5e-02" notation)
+#   * Better formatting of extreme CIs ("No work experience")
+#   * Numeric OR (95% CI) shown on right
+#   * 48+ yrs label + JCHEW (vs CHEW) retained
+#   * Footnote updated
+#   * PNG saved as "fgs_forest_final.png"
+# ============================================================
+
+
+# ---- 2. Settings ----
+outcome    <- "adequate_knowledge"
+keep_preds <- c("age_group", "gender", "years_exp", "cadre")
+
+png_name      <- "fgs_forest_final.png"
+png_width_in  <- 14.5
+png_height_in <- 9.2
+png_dpi       <- 320
+
+# ---- 3. Prepare data (treatment contrasts) ----
+df <- model_df
+
+make_factor <- function(x) {
+  if (is.ordered(x)) factor(as.character(x), ordered = FALSE) else as.factor(x)
+}
+
+refs <- list(
+  age_group = "Middle age (38-47 years)",
+  years_exp = "1-5 years",
+  gender    = "Female",
+  cadre     = "CHEW"
+)
+
+for (v in names(refs)) {
+  if (v %in% names(df)) {
+    df[[v]] <- make_factor(df[[v]])
+    if (refs[[v]] %in% levels(df[[v]])) {
+      df[[v]] <- fct_relevel(df[[v]], refs[[v]])
+    }
+    contrasts(df[[v]]) <- "contr.treatment"
+  }
+}
+
+# ---- 4. Fit model ----
+form <- as.formula(paste(outcome, "~", paste(keep_preds, collapse = " + ")))
+fit  <- glm(form, data = df, family = binomial())
+
+# ---- 5. OR table with nicely formatted numbers ----
+or_tbl <- broom::tidy(fit, conf.int = TRUE, exponentiate = TRUE) %>%
+  dplyr::filter(term != "(Intercept)") %>%
+  dplyr::mutate(
+    label = case_when(
+      term == "age_groupOlder Adults (48 years and above)" ~ 
+        "Older Adults (48+ yrs) (vs Middle age (38-47 years))",
+      term == "age_groupYoung Adults (28-37 years)" ~ 
+        "Young Adults (28-37 yrs) (vs Middle age (38-47 years))",
+      term == "age_groupYouth (18-27 years)" ~ 
+        "Youth (18-27 yrs) (vs Middle age (38-47 years))",
+      term == "genderMale" ~ "Male (vs Female)",
+      term == "years_exp11-15 years" ~ "11-15 yrs (vs 1-5 yrs)",
+      term == "years_exp16 and above" ~ "16+ yrs (vs 1-5 yrs)",
+      term == "years_exp6-10 years" ~ "6-10 yrs (vs 1-5 yrs)",
+      term == "years_expLess than 1 year" ~ "Less than 1 yr (vs 1-5 yrs)",
+      term == "years_expNo work experience" ~ "No work experience (vs 1-5 yrs)",
+      term == "cadreJunior Community Health Extension Worker" ~ "JCHEW (vs CHEW)",
+      term == "cadreLab Technician" ~ "Lab Technician (vs CHEW)",
+      term == "cadreNurse Midwife" ~ "Nurse/Midwife (vs CHEW)",
+      term == "cadreOthers" ~ "Others (vs CHEW)",
+      TRUE ~ term
+    ),
+    nice_ci = if_else(
+      is.na(conf.low) | estimate < 0.001,
+      "0.00 (NA–>1000)",
+      sprintf("%.2f (%.2f–%.2f)", estimate, conf.low, conf.high)
+    )
+  ) %>%
+  dplyr::select(label, estimate, conf.low, conf.high, p.value, nice_ci)
+
+# ---- 6. Print table ----
+cat("\n=== Adjusted Odds Ratios (95% CI) ===\n")
+print(or_tbl[, c("label", "nice_ci", "p.value")], row.names = FALSE)
+
+cat("\nInterpretation:\n")
+cat("No factors were statistically significantly associated with adequate FGS knowledge\n")
+cat("(all 95% CIs include 1; all p > 0.05). Wide intervals reflect limited precision\n")
+cat("and sparse data in several categories, especially 'No work experience'.\n")
+
+# ---- 7. Forest plot ----
+p <- ggplot(or_tbl, aes(x = estimate, y = forcats::fct_rev(label))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red", linewidth = 0.9) +
+  geom_point(size = 3.0, color = "#2c7fb8") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), 
+                 height = 0.22, color = "#2c7fb8", linewidth = 0.9) +
+  geom_text(aes(label = nice_ci, x = 45), hjust = 0, size = 3.5, color = "black") +
+  scale_x_log10(
+    breaks = c(0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100),
+    labels = c("0.05", "0.1", "0.5", "1", "2", "5", "10", "20", "50", "100")
+  ) +
+  labs(
+    title    = "Factors Associated with Adequate FGS Knowledge",
+    subtitle = "Adjusted ORs (95% CI) — Multivariable Logistic Regression",
+    x = "Adjusted Odds Ratio (log scale)",
+    y = NULL,
+    caption = "Red dashed line = no effect (OR = 1). All p > 0.05.\nFacility type excluded (zero variance). N = 60."
+  ) +
+  theme_minimal(base_size = 13.5) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 11.5, lineheight = 1.2),
+    plot.title = element_text(face = "bold", size = 15),
+    plot.caption = element_text(size = 10, hjust = 0, margin = margin(t = 15)),
+    plot.margin = margin(12, 220, 12, 12)
+  )
+
+print(p)
+
+# ---- 8. Save PNG ----
+ggsave(filename = png_name, plot = p, width = png_width_in, 
+       height = png_height_in, dpi = png_dpi, units = "in")
+
+cat("\nPNG saved:", file.path(getwd(), png_name), "\n")
+cat("Download the PNG from your working directory.\n")
+
+# === Barriers ===
+ cat("Lack of patient awareness:", sum(dat$barrier_awareness), "\n")
+ cat("Limited diagnostic tools:", sum(dat$barrier_diagnostic), "\n")
+
+ cat("Inadequate training:", sum(dat$barrier_training), "\n")
+
+ cat("Stigma:", sum(dat$barrier_stigma), "\n")
+
+ cat("Lack of treatment:", sum(dat$barrier_treatment), "\n")
+
+ cat("Don't know:", sum(dat$barrier_dk), "\n")
+
+ cat("Mean barriers:", round(mean(dat$n_barriers), 2), "\n")
+
+ # The multi-select coding is WRONG - need to check actual values
+> cat("=== Q31: Facility Capacity - Actual Values ===\n")
+
+
+cols <- c("barrier_awareness","barrier_diagnostic","barrier_training",
+          "barrier_stigma","barrier_treatment","barrier_dk")
+
+lapply(dat[cols], function(x) {
+  list(class=class(x), values=sort(unique(x)))
+})
+
+to01 <- function(x) {
+  x <- as.character(x)
+  ifelse(is.na(x) | x=="" , 0L,
+         ifelse(x %in% c("1", "Yes", "YES", "True", "TRUE"), 1L, 0L))
+}
+
+dat[cols] <- lapply(dat[cols], to01)
+
+sapply(dat[cols], sum, na.rm=TRUE)
+dat$n_barriers <- rowSums(dat[cols], na.rm=TRUE)
+mean(dat$n_barriers)
+
+# how many rows have ALL six selected?
+sum(rowSums(dat[cols]) == length(cols))
+
+# distribution of number selected
+table(dat$n_barriers)
+
+sapply(dat[cols], function(x) c(sum=sum(x), mean=mean(x), n0=sum(x==0), n1=sum(x==1)))
+
+# Barrier columns and labels (edit labels if you want different wording)
+cols <- c("barrier_awareness","barrier_diagnostic","barrier_training",
+          "barrier_stigma","barrier_treatment","barrier_dk")
+
+labels <- c("Lack of patient awareness",
+            "Limited diagnostic tools",
+            "Inadequate training",
+            "Stigma",
+            "Lack of treatment",
+            "Don't know")
+
+# Build summary with 95% binomial CI
+n <- nrow(dat)
+
+df <- tibble(
+  barrier = factor(labels, levels = rev(labels)),
+  col = cols
+) %>%
+  rowwise() %>%
+  mutate(
+    x = sum(dat[[col]] == 1, na.rm = TRUE),
+    n = n,
+    p = x / n
+  ) %>%
+  ungroup()
+
+# Wilson CI (stable even with small counts)
+wilson_ci <- function(x, n, z = 1.96) {
+  phat <- x/n
+  denom <- 1 + z^2/n
+  center <- (phat + z^2/(2*n)) / denom
+  half <- (z * sqrt((phat*(1-phat) + z^2/(4*n))/n)) / denom
+  c(low = center - half, high = center + half)
+}
+
+cis <- t(mapply(wilson_ci, df$x, df$n))
+df$lo <- cis[, "low"]
+df$hi <- cis[, "high"]
+
+# Forest plot
+p <- ggplot(df, aes(x = p, y = barrier)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey70") +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.2, linewidth = 0.7) +
+  geom_point(size = 2.6) +
+  scale_x_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    x = "Proportion selecting barrier (95% CI)",
+    y = NULL,
+    title = "Barriers to care (forest plot)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+
+p
+
+
+cols <- c("barrier_awareness","barrier_diagnostic","barrier_training",
+          "barrier_stigma","barrier_treatment","barrier_dk")
+
+labels <- c("Lack of patient awareness",
+            "Limited diagnostic tools",
+            "Inadequate training",
+            "Stigma",
+            "Lack of treatment",
+            "Don't know")
+
+n <- nrow(dat)
+
+df <- tibble(
+  barrier = factor(labels, levels = rev(labels)),
+  col = cols
+) |>
+  rowwise() |>
+  mutate(
+    x = sum(dat[[col]] == 1, na.rm = TRUE),
+    n = n,
+    p = x / n
+  ) |>
+  ungroup()
+
+# Wilson 95% CI
+wilson_ci <- function(x, n, z = 1.96) {
+  phat <- x/n
+  denom <- 1 + z^2/n
+  center <- (phat + z^2/(2*n)) / denom
+  half <- (z * sqrt((phat*(1-phat) + z^2/(4*n))/n)) / denom
+  c(low = center - half, high = center + half)
+}
+cis <- t(mapply(wilson_ci, df$x, df$n))
+df$lo <- cis[, "low"]
+df$hi <- cis[, "high"]
+
+# Color groups
+df <- df |>
+  mutate(level = cut(p,
+                     breaks = c(-Inf, 0.30, 0.60, Inf),
+                     labels = c("Low (<30%)", "Medium (30–60%)", "High (>60%)")))
+
+pal <- c("Low (<30%)" = "#1f78b4",      # blue
+         "Medium (30–60%)" = "#ff7f00", # orange
+         "High (>60%)" = "#33a02c")     # green
+
+p <- ggplot(df, aes(x = p, y = barrier, color = level)) +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.20, linewidth = 0.9) +
+  geom_point(size = 3) +
+  scale_color_manual(values = pal, drop = FALSE) +
+  scale_x_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    x = "Proportion selecting barrier (95% CI)",
+    y = NULL,
+    color = NULL,
+    title = "Barriers to care (forest plot)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold")
+  )
+
+p
+ggsave("barriers_forest_plot.png", p, width = 7.0, height = 4.8, dpi = 300)
+library(officer)
+
+doc <- read_docx()
+doc <- body_add_par(doc, "Barriers to care (forest plot)", style = "heading 1")
+doc <- body_add_img(doc, src = "barriers_forest_plot.png", width = 6.5, height = 4.5)
+
+print(doc, target = "barriers_forest_plot.docx")
